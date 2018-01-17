@@ -30,7 +30,11 @@ get_seasonal_targets <- function(pred_ts, past_ts, baseline){
   if(is.na(start_ind)){
     start_ind = "none"
   }
-  start_ind = ifelse(start_ind==1, 1, sum(runs_above_baseline$lengths[1 : (start_ind - 1)]) + 1)
+
+  start_ind = try(ifelse(start_ind==1, 1, sum(runs_above_baseline$lengths[1 : (start_ind - 1)]) + 1))
+  if(class(start_ind) == "try-error"){
+    browser()
+  }
 
   peak_intensity <- max(ts, na.rm = T)
   peak_ind <- match(peak_intensity, ts)
@@ -47,8 +51,8 @@ get_seasonal_targets <- function(pred_ts, past_ts, baseline){
 
 get_season_baseline <- function(epi_data){
   ## Gets the baseline threshold for a given season of fluview data
-  wili_baselines %>% filter(region == unique(epi_data$region),
-                            year == unique(epi_data$season)) %>%
+  wili_baselines %>% filter(region == unique(epi_data$region[!is.na(epi_data$region)]),
+                            year == unique(epi_data$season[!is.na(epi_data$season)])) %>%
     select(value) %>% pull
 }
 
