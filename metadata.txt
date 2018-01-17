@@ -1,0 +1,9 @@
+team_name: UTAustin
+team_members: 'Spencer J Fox'
+model_name: Empirical dynamic model
+model_abbr: edm
+anonymity: named
+data_source1: ILI
+data_source2: NULL
+this_model_is_an_ensemble: FALSE
+methods: [1 paragraph overview of methodology: ensure OOS predictions are made according to the ensemble rules.]
