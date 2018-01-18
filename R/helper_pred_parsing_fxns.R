@@ -28,13 +28,15 @@ get_seasonal_targets <- function(pred_ts, past_ts, baseline){
 
   start_ind = match(T, (runs_above_baseline$lengths > 2 & runs_above_baseline$values == T))
   if(is.na(start_ind)){
-    start_ind = "none"
+    start_ind = 0   ## zero encodes seasons that don't ever "start" according to CDC definition
+  } else{
+    start_ind = try(ifelse(start_ind==1, 1, sum(runs_above_baseline$lengths[1 : (start_ind - 1)]) + 1))
+    if(class(start_ind) == "try-error"){
+      browser()
+    }
   }
 
-  start_ind = try(ifelse(start_ind==1, 1, sum(runs_above_baseline$lengths[1 : (start_ind - 1)]) + 1))
-  if(class(start_ind) == "try-error"){
-    browser()
-  }
+
 
   peak_intensity <- max(ts, na.rm = T)
   peak_ind <- match(peak_intensity, ts)
@@ -76,7 +78,21 @@ get_forecast_targets <- function(sims, epi_data){
     bind_rows()
 }
 
+est_mode <- function(x) {
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
 
+get_binned_probs <- function(vec, brks, n, is_week=FALSE){
+  ## Returns binned probability from vector
+  if(is_week){
+    ## Remove any predictions outside of week 20
+    n <- n - sum(vec >= max(brks))
+    vec <- vec[vec<max(brks)]
+
+  }
+  hist(vec, brks, plot = FALSE, right= FALSE)$counts / n
+}
 
 format_sim_data <- function(sim_summaries, epi_data){
   ## Massive function to get all the summary sim data into properly
@@ -92,17 +108,16 @@ format_sim_data <- function(sim_summaries, epi_data){
   percent_sums <- data_frame(Bin_start_incl = prcnt_brks[-length(prcnt_brks)],
                              Bin_end_notincl = prcnt_brks[-1],
                              Unit = "percent") %>%
-    mutate(`1 wk ahead` = hist(sim_summaries$ahead_1, prcnt_brks, plot = FALSE, right = FALSE)$counts / n,
-           `2 wk ahead` = hist(sim_summaries$ahead_2, prcnt_brks, plot = FALSE, right = FALSE)$counts / n,
-           `3 wk ahead` = hist(sim_summaries$ahead_3, prcnt_brks, plot = FALSE, right = FALSE)$counts / n,
-           `4 wk ahead` = hist(sim_summaries$ahead_4, prcnt_brks, plot = FALSE, right = FALSE)$counts / n,
-           `Season peak percentage` = hist(sim_summaries$peak_intensity, prcnt_brks, plot = FALSE, right= FALSE)$counts / n) %>%
+    mutate(`1 wk ahead` = get_binned_probs(sim_summaries$ahead_1, prcnt_brks, n),
+           `2 wk ahead` = get_binned_probs(sim_summaries$ahead_2, prcnt_brks, n),
+           `3 wk ahead` = get_binned_probs(sim_summaries$ahead_3, prcnt_brks, n),
+           `4 wk ahead` = get_binned_probs(sim_summaries$ahead_4, prcnt_brks, n),
+           `Season peak percentage` = get_binned_probs(sim_summaries$peak_intensity, prcnt_brks, n)) %>%
     gather(Target, Value, `1 wk ahead`:`Season peak percentage`)
-
 
   ## Setup the weekly data_frames
   week_brks <- curr_data %>%
-    filter((week >= 40 & year == unique(season)) | week <= 20 & year != unique(season)) %>%
+    filter((week >= 40 & year == unique(season)) | week <= 21 & year != unique(season)) %>%
     select(week) %>%
     pull
 
@@ -111,23 +126,47 @@ format_sim_data <- function(sim_summaries, epi_data){
   ind_nudge <- rle(curr_data$week < 40 & curr_data$year == unique(curr_data$season))$lengths[1]
   ind_brks <- seq_along(week_brks) + ind_nudge
 
-  ## Now compule the data_frame for the week data
+  # this step is meant to include 0, which is how we've encoded that the season doesn't start
+  ind_brks <- c(0, ind_brks)
+  week_brks <- c(NA, week_brks)
+
+  ## Now compile the data_frame for the week data
+  # if(class(try(hist(sim_summaries$start_ind, ind_brks, plot = FALSE, right= FALSE)$counts / n) ) == "try-error"){
+  #   browser()
+  # }
   week_sums <- data_frame(Bin_start_incl = week_brks[-length(week_brks)],
                           Bin_end_notincl = week_brks[-1],
                           Unit = "week") %>%
-    mutate(`Season onset` = hist(sim_summaries$start_ind, ind_brks, plot = FALSE, right= FALSE)$counts / n,
-           `Season peak week` = hist(sim_summaries$peak_ind, ind_brks, plot = FALSE, right= FALSE)$counts / n) %>%
-    gather(Target, Value, `Season onset`:`Season peak week`)
+    mutate(Bin_end_notincl = if_else(is.na(Bin_start_incl), as.integer(NA), Bin_end_notincl)) %>%
+    mutate(`Season onset` = get_binned_probs(sim_summaries$start_ind, ind_brks, n, is_week = T),
+           `Season peak week` = get_binned_probs(sim_summaries$peak_ind, ind_brks, n, is_week = T)) %>%
+    gather(Target, Value, `Season onset`:`Season peak week`) %>%
+    filter(! (Target == "Season peak week" & is.na(Bin_start_incl))) # Remove the "none" row for peak week, because there's always a peak
 
 
   ## Combine the binned data_frames and get into proper format
   binned_sums <- bind_rows(percent_sums, week_sums) %>%
-    mutate(Type = "Bin")
+    mutate(Type = "Bin",
+           Bin_start_incl = if_else(is.na(Bin_start_incl), "none", as.character(Bin_start_incl)),
+           Bin_end_notincl = if_else(is.na(Bin_end_notincl), "none", as.character(Bin_end_notincl)),
+           Value = as.character(Value))
+
 
   ## Setup the point estimate data_frame
-  point_sums <- sim_summaries %>% summarise_all(mean) %>%
-    mutate(`Season onset` = curr_data$week[start_ind],
-           `Season peak week` = curr_data$week[peak_ind],
+  point_sums <- sim_summaries %>% summarise(ahead_1 = mean(ahead_1),
+                                            ahead_2 = mean(ahead_2),
+                                            ahead_3 = mean(ahead_3),
+                                            ahead_4 = mean(ahead_4),
+                                            peak_intensity = mean(peak_intensity),
+                                            start_ind = est_mode(start_ind),
+                                            peak_ind = est_mode(peak_ind))
+  if(point_sums$start_ind == 0){
+    point_sums <- point_sums %>% mutate(`Season onset` = "none")
+  } else{
+    point_sums <- point_sums %>% mutate(`Season onset` = as.character(curr_data$week[start_ind]))
+  }
+  point_sums <- point_sums %>%
+    mutate(`Season peak week` = curr_data$week[peak_ind],
            Type = "Point",
            Bin_start_incl = NA,
            Bin_end_notincl = NA) %>%
@@ -142,7 +181,7 @@ format_sim_data <- function(sim_summaries, epi_data){
 
 
   ## Combine binned with point data, properly format, and return
-  region <- get_location(curr_data)
+  region <- get_region(curr_data)
 
   bind_rows(point_sums, binned_sums) %>%
     mutate(`Location` = region) %>%
@@ -152,7 +191,7 @@ format_sim_data <- function(sim_summaries, epi_data){
 
 get_region <- function(epi_data){
   ## Get the proper location name, using the shorthand
-  wili_baselines$location[match(unique(curr_data$region[!is.na(curr_data$region)]), wili_baselines$region)]
+  wili_baselines$location[match(unique(epi_data$region[!is.na(epi_data$region)]), wili_baselines$region)]
 }
 
 
