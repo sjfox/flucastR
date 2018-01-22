@@ -11,6 +11,8 @@ get_all_regional_forecasts <- function(epi_week, save=TRUE){
     map(get_regional_forecast, epi_week=epi_week) %>%
     bind_rows()
 
+  # year <- as.numeric(substring(epi_week, 1,4))
+  # year <- if_else(as.numeric(substring(epi_week, 5)) <= 20, year - 1, year)
   if(save){
     file_name <- paste0("EW", substring(epi_week, 5), "-", substring(epi_week, 1,4), "-UTAustin_edm.csv")
     write_csv(all_forecasts, path = here(file.path("forecasts", file_name)))
