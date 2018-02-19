@@ -57,10 +57,25 @@ load_historic_fluview <- function(region, epi_week){
   mimicPastEpidataDF(epi_data, epi_week)
 }
 
-convert_to_forecast_form <- function(df){
+convert_to_forecast_form <- function(df, epi_week){
   ## takes a data frame and epi_week, and returns a vector ready for forecasting
   ## df must be df from load_historic_fluview()
   ## epi_week needs to be in form YYYYWW
-  df %>% select(wili) %>%
+  df %>%
+    filter( !(season == season_from_epi_week(epi_week) & (week >20 & week <= 30) )) %>%
+    select(wili) %>%
     pull()
+}
+
+season_from_epi_week <- function(epi_weeks){
+  yr <- year_from_epi_week(epi_weeks)
+  if_else(week_from_epi_week(epi_weeks) > 30, yr, yr - 1)
+}
+
+
+year_from_epi_week <- function(epi_weeks){
+  as.numeric(substr(epi_weeks, start = 1, stop = 4))
+}
+week_from_epi_week <- function(epi_weeks){
+  as.numeric(substring(epi_weeks, 5))
 }

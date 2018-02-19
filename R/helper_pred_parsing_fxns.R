@@ -87,9 +87,15 @@ get_binned_probs <- function(vec, brks, n, is_week=FALSE){
   ## Returns binned probability from vector
   if(is_week){
     ## Remove any predictions outside of week 20
-    n <- n - sum(vec >= max(brks))
-    vec <- vec[vec<max(brks)]
-
+    max_val <- max(brks) - 1
+    vec <- if_else(vec > max_val, max_val, as.numeric(vec))
+    # n <- n - sum(vec >= max(brks))
+    # if (n == 0){
+    #   ## This should never happen now, so browser to figure out when it's happening.
+    #   browser()
+    # } else{
+    #   vec <- vec[vec < max(brks)]
+    # }
   }
   hist(vec, brks, plot = FALSE, right= FALSE)$counts / n
 }

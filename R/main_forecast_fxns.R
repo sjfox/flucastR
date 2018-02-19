@@ -5,16 +5,16 @@
 #############################################
 
 
-get_all_regional_forecasts <- function(epi_week, save=TRUE){
+get_all_regional_forecasts <- function(epi_week, seasonal_embeddings, save=TRUE){
   regions <- c("nat", "hhs1", "hhs2", "hhs3", "hhs4", "hhs5", "hhs6", "hhs7", "hhs8", "hhs9", "hhs10")
   all_forecasts <- regions %>%
-    map(get_regional_forecast, epi_week=epi_week) %>%
+    map(get_regional_forecast, seasonal_embeddings = seasonal_embeddings, epi_week=epi_week) %>%
     bind_rows()
 
   # year <- as.numeric(substring(epi_week, 1,4))
   # year <- if_else(as.numeric(substring(epi_week, 5)) <= 20, year - 1, year)
   if(save){
-    file_name <- paste0("EW", substring(epi_week, 5), "-", substring(epi_week, 1,4), "-UTAustin_edm.csv")
+    file_name <- paste0("EW", str_pad(week_from_epi_week(epi_week), 2, pad = "0"), "-", year_from_epi_week(epi_week), "-UTAustin_edm.csv")
     write_csv(all_forecasts, path = here(file.path("forecasts", file_name)))
   }else{
     return(all_forecasts)
@@ -23,8 +23,7 @@ get_all_regional_forecasts <- function(epi_week, save=TRUE){
 
 
 
-
-get_regional_forecast <- function(region, epi_week) {
+get_regional_forecast <- function(region, seasonal_embeddings, epi_week) {
 
   # Getting the data ready --------------------------------------------------
   # Load in the baselines for all seasons
@@ -36,10 +35,11 @@ get_regional_forecast <- function(region, epi_week) {
 
   # Forecast forward through the season -------------------------------------
   ## Process that data into the proper form for forecasting
-  forecast_ts <- convert_to_forecast_form(fluview)
+  forecast_ts <- convert_to_forecast_form(fluview, epi_week)
 
   ## Get the forecasts
-  forecasts <- make_edm_preds(forecast_ts)
+  embedding <- extract_embedding(region, epi_week, seasonal_embeddings)
+  forecasts <- make_edm_preds(forecast_ts, embedding)
 
   ## From the forecasts we simulate epidemic trajectories
   sims <- sim_pred_epi_traj(forecasts)

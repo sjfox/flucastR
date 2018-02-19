@@ -5,10 +5,14 @@
 #############################################
 
 
+extract_embedding <- function(target_region, epi_week, embeddings){
+  embeddings %>% filter(region == target_region, season == season_from_epi_week(epi_week)) %>%
+    select(embedding) %>% pull
+}
+
 find_embedding <- function(train, test, ts){
   ## Uses simple method to find embedding dimension for time series
   ## Basically finds the first local maxima in the forecast skill and chooses that
-
   simplex_output <- simplex(ts, train, test)
   embedding <- try(which(diff(simplex_output$rho) < 0)[1])
 
@@ -30,25 +34,51 @@ find_embedding <- function(train, test, ts){
   embedding
 }
 
+get_embedding <- function(region, first_epi_week, test_prop=0.8){
+  fluview <- load_historic_fluview(region, first_epi_week)
 
-make_edm_preds <- function(ts, train_percent = 0.8) {
+  ts <- convert_to_forecast_form(fluview, first_epi_week)
+  weeks_ahead <- get_weeks_pred(ts)
+  n <- length(ts) - weeks_ahead
+
+  ## Setup the train and test.
+  train <- c(1, round(n*test_prop))
+  test <- c(round(n*test_prop)+1, n+weeks_ahead)
+
+
+  # get embedding and make predictions --------------------------------------
+  embed_dimension <- find_embedding(train, test, ts)
+  data_frame(epi_week = first_epi_week, region = region, embedding = embed_dimension)
+}
+get_all_regions_embedding <- function(first_epi_week, regions, test_prop=0.8){
+  regions %>% map(get_embedding, first_epi_week=first_epi_week) %>% bind_rows()
+}
+
+
+
+make_edm_preds <- function(ts, embed_dimension, train_percent = 0.8) {
   ## ts should be vector containing the time series to predict on
   ##    ts should be numeric vector, with NAs at the end of the vector indicating how many weeks to predict
   ## train_percent should be 0-1 percentage of data to use for training
 
   #  setup data for prediction ----------------------------------------------
   weeks_ahead <- get_weeks_pred(ts)
+  if(weeks_ahead < 4){
+    nas_needed <- 4-weeks_ahead
+    ts <- c(ts, rep(NA,nas_needed))
+    weeks_ahead <- 4
+  }
   n <- length(ts) - weeks_ahead
-  train <- c(1, round(n*.8))
+  train <- c(1, round(n*train_percent))
 
   # Augment data to have NAs that will be filled in with forward predictions
   ts <- c(ts, rep(NA, weeks_ahead))
-  test <- c(round(n*.8)+1, n+weeks_ahead)
+  test <- c(round(n*train_percent)+1, n+weeks_ahead)
 
 
-  # get embedding and make predictions --------------------------------------
-  embed_dimension <- find_embedding(train, test, ts)
+  # Make predictions --------------------------------------
   preds <- simplex(time_series = ts, lib = train, pred = test, E = embed_dimension, tp = 1:weeks_ahead, stats_only = F)
+  # preds <- simplex(time_series = ts, lib = c(1,700), pred = c(701, 721), E = embed_dimension, tp = 1:weeks_ahead, stats_only = F)
 
   # clean the predictions ---------------------------------------------------
   # properly combines the preds into a data_frame with predictions and their variances
@@ -69,7 +99,7 @@ get_weeks_pred <- function(ts){
     runs <- rle(is.na(ts))
     tail(runs$lengths,1)
   } else {
-    NA
+    0
   }
 }
 
